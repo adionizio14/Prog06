@@ -25,7 +25,7 @@ using namespace std;
 //==================================================================================
 void myKeyboard(unsigned char c, int x, int y);
 void initializeApplication(int argc, char** argv);
-unsigned char computeContrast(RasterImage* image, int row, int col);
+int computeContrast(RasterImage* image, int row, int col);
 void* threadFunc(void* argument);
 
 
@@ -288,15 +288,6 @@ void initializeApplication(int argc, char** argv)
     //	are at best fools.  Here I am not using it to produce "serious" data (as in a
     //	simulation), only some color, in meant-to-be-thrown-away code
 
-    //	seed the pseudo-random generator
-    //srand((unsigned int) time(NULL));
-
-    //	right now I read *one* hardcoded image, into my output
-    //	image. This is definitely something that you will want to
-    //	change.
-    //const string hardCodedInput = "../TempData/_MG_6386.tga";
-    //imageOut = readTGA(hardCodedInput.c_str());
-
     // Read the command line arguments
     unsigned int numThreads = stoi(argv[1]);
     std::string output_image = argv[2];
@@ -352,7 +343,10 @@ void initializeApplication(int argc, char** argv)
 }
 
 void* threadFunc(void* argument){
+
+    // get the thread info
     ThreadInfo* info = (ThreadInfo*) argument;
+
     //  unsigned char** rasterOut = (unsigned char**)(info->imageOut->raster2D);
     int** rasterOut = (int**)(info->imageOut->raster2D);
 
@@ -360,47 +354,71 @@ void* threadFunc(void* argument){
     for (unsigned int i = info->startRow; i <= info->endRow; i++) {
         for (unsigned int j = 0; j < info->imageOut->width; j++) {
 
-            unsigned char contrast_score = 0;
-            unsigned char image_index = 0;
+            // initialize contrast score and image index
+            int contrast_score = 0;
+            int image_index = 0;
 
             // loop through every image
             for(long unsigned int k = 0; k < info->images.size(); k++){
-                // get the contrast of each window
-                unsigned char contrast = computeContrast(info->images[k], i, j);
 
+                // get the contrast of each window
+                int contrast = computeContrast(info->images[k], i, j);
+
+                // keep track of the image with the highest contrast score
                 if (contrast > contrast_score) {
                     contrast_score = contrast;
                     image_index = k;
                 }
-
             }
-            int** rasterIn = (int**)(info->images[image_index]->raster2D);
-            // set the pixel to the pixel in the image with the highest contrast score
-            rasterOut[i][j] = rasterIn[i][j];
 
+            // get the raster of the image with the highest contrast score
+            int** rasterIn = (int**)(info->images[image_index]->raster2D);
+
+            // get the rgba values of the pixel
+            unsigned char* rgba_out = (unsigned char*)(rasterOut[i] + j);
+            unsigned char* rgba_in = (unsigned char*)(rasterIn[i] + j);
+
+            // copy the rgba values of the pixel
+            rgba_out[0] = rgba_in[0];
+            rgba_out[1] = rgba_in[1];
+            rgba_out[2] = rgba_in[2];
+            rgba_out[3] = rgba_in[3];
 
         }
 
     }
 
-    //
     return nullptr;
 
 }
 
-unsigned char computeContrast(RasterImage* image, int row, int col){
+int computeContrast(RasterImage* image, int row, int col){
 
-    unsigned char** rasterIn = (unsigned char**)(image->raster2D);
+    // get the raster of the image
+    int** rasterIn = (int**)(image->raster2D);
+
+    // get the start and end row and column
     int start_row = max(0, row-2), end_row=min((int) image->height-1, (int) row+2);
     int start_col = max(0, col-2), end_col=min((int) image->width-1, (int)col+2);
-    unsigned char min_gray = 255;
-    unsigned char max_gray = 0;
+
+    // initialize min and max gray values
+    int min_gray = 255;
+    int max_gray = 0;
+
+    // loop through the 5x5 window
     for (int k = start_row; k <= end_row; k++) {
         for (int l = start_col; l <= end_col; l++) {
 
-            unsigned char* rgba = rasterIn[k] + 4*l;
+            // get the rgba values of the pixel
+            //int* rgba = rasterIn[k] + 4*l;
+            unsigned char* rgba = (unsigned char*)(rasterIn[k] + l);
+            // get the red, green, and blue values of the pixel using bit masking
+            //cout << "rgba: " << rgba << endl;
+
             // get the gray value of the pixel
-            unsigned char gray = (unsigned char) ((0 + rgba[0] + rgba[1] + rgba[2])/3);
+            int gray = (int)(( 0 + rgba[0] + rgba[1] + rgba[2]) / 3);
+
+            //std::cout << "gray: " << gray << std::endl;
 
             //keep track of the min and max gray values
             if (gray < min_gray) {
@@ -411,7 +429,7 @@ unsigned char computeContrast(RasterImage* image, int row, int col){
             }
         }
     }
-    //   unsigned char contrast = max_gray - min_gray;
+
 
     return max_gray - min_gray;
 }
