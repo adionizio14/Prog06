@@ -25,7 +25,7 @@ using namespace std;
 void myKeyboard(unsigned char c, int x, int y);
 void initializeApplication(int argc, char** argv);
 void* threadFunc(void* argument);
-unsigned char computeContrast(RasterImage* image, int row, int col);
+int computeContrast(RasterImage* image, int row, int col);
 
 
 //==================================================================================
@@ -375,7 +375,7 @@ void* threadFunc(void* argument){
         for(long unsigned int k = 0; k < info->images.size(); k++){
 
             // get the contrast of each window
-            unsigned char contrast = computeContrast(info->images[k], i, j);
+            int contrast = computeContrast(info->images[k], i, j);
 
             // keep track of the image with the highest contrast score
             if (contrast > contrast_score) {
@@ -387,6 +387,8 @@ void* threadFunc(void* argument){
         // get the raster of the image with the highest contrast score
         int** rasterIn = (int**)(info->images[image_index]->raster2D);
 
+        // START HERE TOMORROW ANDREW
+
 
 
         count++;
@@ -397,30 +399,28 @@ void* threadFunc(void* argument){
     return nullptr;
 }
 
-unsigned char computeContrast(RasterImage* image, int row, int col){
+int computeContrast(RasterImage* image, int row, int col){
 
     // get the raster of the image
-    unsigned char** rasterIn = (unsigned char**)(image->raster2D);
+    int** rasterIn = (int**)(image->raster2D);
 
     // get the start and end row and column for an 11x11 window
     int start_row = max(0, row-5), end_row=min((int) image->height-1, (int) row+5);
     int start_col = max(0, col-5), end_col=min((int) image->width-1, (int)col+5);
-//    int start_row = max(0, row-2), end_row=min((int) image->height-1, (int) row+2);
-//    int start_col = max(0, col-2), end_col=min((int) image->width-1, (int)col+2);
 
     // initialize min and max gray values
-    unsigned char min_gray = 255;
-    unsigned char max_gray = 0;
+    int min_gray = 255;
+    int max_gray = 0;
 
     // loop through the 11x11 window
     for (int k = start_row; k <= end_row; k++) {
         for (int l = start_col; l <= end_col; l++) {
 
             // get the rgba values of the pixel
-            unsigned char* rgba = rasterIn[k] + 4*l;
+            unsigned char* rgba = (unsigned char*)(rasterIn[k] + l);
 
             // get the gray value of the pixel
-            unsigned char gray = (unsigned char) ((0 + rgba[0] + rgba[1] + rgba[2])/3);
+            int gray = (int) ((0 + rgba[0] + rgba[1] + rgba[2])/3);
 
             //keep track of the min and max gray values
             if (gray < min_gray) {

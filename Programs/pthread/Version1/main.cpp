@@ -299,7 +299,6 @@ void initializeApplication(int argc, char** argv)
 
     // initialize output image
     imageOut = new RasterImage(images[0]->width, images[0]->height, RGBA32_RASTER);
-
     // create array of ThreadInfo structs
     ThreadInfo* threadInfo = (ThreadInfo*) calloc(numThreads, sizeof(ThreadInfo));
 
