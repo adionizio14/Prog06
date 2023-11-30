@@ -26,6 +26,8 @@ void myKeyboard(unsigned char c, int x, int y);
 void initializeApplication(int argc, char** argv);
 void* threadFunc(void* argument);
 int computeContrast(RasterImage* image, int row, int col);
+void fill_imageOut(RasterImage* imageOut);
+void combine_images(int** rasterOut, RasterImage* image, int row, int col);
 
 
 //==================================================================================
@@ -86,6 +88,7 @@ const string hardCodedOutPath = "./outputImage.tga";
 struct ThreadInfo
 {
     pthread_t threadID;
+    unsigned int index;
     vector<RasterImage*> images;
     RasterImage* imageOut;
     uniform_int_distribution<unsigned int> rowDist;
@@ -278,17 +281,6 @@ void initializeApplication(int argc, char** argv)
 	//	that the C/C++ default random generator is junk and that the people who use it
 	//	are at best fools.  Here I am not using it to produce "serious" data (as in a
 	//	simulation), only some color, in meant-to-be-thrown-away code
-	
-
-//
-//	//	right now I read *one* hardcoded image, into my output
-//	//	image. This is definitely something that you will want to
-//	//	change.
-//	const string hardCodedInput = "../TempData/_MG_6386.tga";
-//	imageOut = readTGA(hardCodedInput.c_str());
-//
-
-
 
     //	seed the pseudo-random generator
     srand((unsigned int) time(NULL));
@@ -302,15 +294,11 @@ void initializeApplication(int argc, char** argv)
         images.push_back(readTGA(argv[i]));
     }
 
-//    cout << "Number of threads: " << numThreads << endl;
-//    cout << "Output image: " << output_image << endl;
-//    cout << "Input images: " << endl;
-//    for(int i = 0; i < images.size(); i++){
-//        cout << argv[i+3] << endl;
-//    }
-
     // initialize output image
     imageOut = new RasterImage(images[0]->width, images[0]->height, RGBA32_RASTER);
+
+    // initialize image out raster with pure black pixels
+    fill_imageOut(imageOut);
 
     //	Having read my image, I can now initialize my random distributions
     rowDist = uniform_int_distribution<unsigned int>(0, imageOut->height-1);
@@ -324,6 +312,8 @@ void initializeApplication(int argc, char** argv)
 
     // fill in threadInfo structs
     for(int i = 0; i < numThreads; i++){
+
+        threahInfo[i].index = i;
         threadInfo[i].images = images;
         threadInfo[i].imageOut = imageOut;
         threadInfo[i].rowDist = rowDist;
@@ -346,6 +336,12 @@ void initializeApplication(int argc, char** argv)
     for(int i = 0; i < numThreads; i++){
         pthread_join(threadInfo[i].threadID, nullptr);
     }
+
+    // destroy lock
+    pthread_mutex_destroy(&myWriteLock);
+
+    // write output image
+    writeTGA(output_image.c_str(), imageOut);
 
 	launchTime = time(NULL);
 }
@@ -385,16 +381,12 @@ void* threadFunc(void* argument){
         }
 
         // get the raster of the image with the highest contrast score
-        int** rasterIn = (int**)(info->images[image_index]->raster2D);
 
-        // START HERE TOMORROW ANDREW
-
-
-
+        combine_images(rasterOut, info->images[image_index], i, j);
         count++;
 
     }
-    while(count < 10);
+    while(count < 10000);
 
     return nullptr;
 }
@@ -434,4 +426,58 @@ int computeContrast(RasterImage* image, int row, int col){
     }
 
     return max_gray - min_gray;
+}
+
+void fill_imageOut(RasterImage* imageOut){
+
+    int** rasterOut = (int**)(imageOut->raster2D);
+
+    for (int i = 0; i < imageOut->height; i++) {
+        for (int j = 0; j < imageOut->width; j++) {
+            unsigned char* rgba = (unsigned char*)(rasterOut[i] + j);
+            rgba[0] = 0;
+            rgba[1] = 0;
+            rgba[2] = 0;
+            rgba[3] = 255;
+        }
+    }
+}
+
+void combine_images(int** rasterOut, RasterImage* image, int row, int col){
+
+    // lock the mutex
+    pthread_mutex_lock(&myWriteLock);
+
+    int start_row = max(0, row-5), end_row=min((int) image->height-1, (int) row+5);
+    int start_col = max(0, col-5), end_col=min((int) image->width-1, (int)col+5);
+
+    int** rasterIn = (int**)(image->raster2D);
+
+    for (int k = start_row; k <= end_row; k++) {
+        for (int l = start_col; l <= end_col; l++) {
+
+            unsigned char* rgba_out = (unsigned char*)(rasterOut[k] + l);
+            int red = (int) rgba_out[0];
+            int green = (int) rgba_out[1];
+            int blue = (int) rgba_out[2];
+            int alpha = (int) rgba_out[3];
+
+            unsigned char* rgba_in = (unsigned char*)(rasterIn[k] + l);
+
+            if (red == 0 && green == 0 && blue == 0 && alpha == 255) {
+                rgba_out[0] = rgba_in[0];
+                rgba_out[1] = rgba_in[1];
+                rgba_out[2] = rgba_in[2];
+            }
+            else{
+                rgba_out[0] = (unsigned char) (0.5 * (int)rgba_in[0] + 0.5 * (int)rgba_out[0]);
+                rgba_out[1] = (unsigned char) (0.5 * (int)rgba_in[1] + 0.5 * (int)rgba_out[1]);
+                rgba_out[2] = (unsigned char) (0.5 * (int)rgba_in[2] + 0.5 * (int)rgba_out[2]);
+            }
+        }
+    }
+
+    // unlock the mutex
+    pthread_mutex_unlock(&myWriteLock);
+
 }
