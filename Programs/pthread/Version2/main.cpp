@@ -9,6 +9,7 @@
 #include <string>
 #include <random>
 #include <pthread.h>
+#include <unistd.h>
 //
 #include <cstdio>
 #include <cstdlib>
@@ -85,6 +86,11 @@ uniform_int_distribution<unsigned int> colDist;
 
 const string hardCodedOutPath = "./outputImage.tga";
 
+unsigned int numThreads;
+std::string output_image;
+std::vector<RasterImage*> images;
+unsigned int i = 0;
+
 struct ThreadInfo
 {
     pthread_t threadID;
@@ -95,7 +101,9 @@ struct ThreadInfo
     uniform_int_distribution<unsigned int> colDist;
 };
 
+std::vector<ThreadInfo> threadInfo;
 pthread_mutex_t myWriteLock;
+bool shouldTerminate = false;
 
 //==================================================================================
 //	These are the functions that tie the computation with the rendering.
@@ -115,25 +123,18 @@ void displayImage(GLfloat scaleX, GLfloat scaleY)
 	glLoadIdentity();
 	glPixelZoom(scaleX, scaleY);
 
-	//--------------------------------------------------------
-	//	stuff to replace or remove.
-	//	Here, each time we render the image I assign a random
-	//	color to a few random pixels
-	//--------------------------------------------------------
-//	unsigned char** imgRaster2D = (unsigned char**)(imageOut->raster2D);
-//
-//	for (int k=0; k<100; k++) {
-//		unsigned int i = rowDist(myEngine);
-//		unsigned int j = colDist(myEngine);
-//
-//		//	get pointer to the pixel at row i, column j
-//		unsigned char* rgba = imgRaster2D[i] + 4*j;
-//		// random r, g, b
-//		rgba[0] = colorChannelDist(myEngine);
-//		rgba[1] = colorChannelDist(myEngine);
-//		rgba[2] = colorChannelDist(myEngine);
-//		//	keep alpha unchanged at 255
-//	}
+
+    // each time the image is rendered, a new thread is created until the max number of threads is reached
+    if (i < numThreads) {
+        int err = pthread_create(&threadInfo[i].threadID, nullptr, threadFunc, &threadInfo[i]);
+        if (err != 0) {
+            cout << "Could not create Thread " << i << ". [" << err << "]: " <<
+                 strerror(err) << endl << flush;
+            exit(1);
+        }
+        i++;
+    }
+
 
 	//==============================================
 	//	This is OpenGL/glut magic.  Don't touch
@@ -180,7 +181,6 @@ void displayState(void)
 
 void cleanupAndQuit(void)
 {
-	writeTGA(hardCodedOutPath.c_str(), imageOut);
 
 	//	Free allocated resource before leaving (not absolutely needed, but
 	//	just nicer.  Also, if you crash there, you know something is wrong
@@ -190,6 +190,18 @@ void cleanupAndQuit(void)
 	free(message);
 
 	// delete images [optional]
+    images.clear();
+
+    // join threads
+    for(int i = 0; i < numThreads; i++){
+        pthread_join(threadInfo[i].threadID, nullptr);
+    }
+
+    // destroy lock
+    pthread_mutex_destroy(&myWriteLock);
+
+    // write output image
+    writeTGA(output_image.c_str(), imageOut);
 	
 	exit(0);
 }
@@ -206,6 +218,7 @@ void handleKeyboardEvent(unsigned char c, int x, int y)
 		//	'esc' to quit
 		case 27:
 			//	If you want to do some cleanup, here would be the time to do it.
+            shouldTerminate = true;
 			cleanupAndQuit();
 			break;
 
@@ -285,8 +298,9 @@ void initializeApplication(int argc, char** argv)
     //	seed the pseudo-random generator
     srand((unsigned int) time(NULL));
     // Read the command line arguments
-    int numThreads = stoi(argv[1]);
-    std::string output_image = argv[2];
+    numThreads = stoi(argv[1]);
+    output_image = argv[2];
+    numLiveFocusingThreads = numThreads;
 
     // create a vector of raster images
     vector<RasterImage*> images;
@@ -308,40 +322,18 @@ void initializeApplication(int argc, char** argv)
     pthread_mutex_init(&myWriteLock, nullptr);
 
     // create array of ThreadInfo structs
-    ThreadInfo* threadInfo = new ThreadInfo[numThreads];
+    threadInfo.resize(numThreads);
 
     // fill in threadInfo structs
     for(int i = 0; i < numThreads; i++){
 
-        threahInfo[i].index = i;
+        threadInfo[i].index = i;
         threadInfo[i].images = images;
         threadInfo[i].imageOut = imageOut;
         threadInfo[i].rowDist = rowDist;
         threadInfo[i].colDist = colDist;
 
     }
-
-    // create threads
-    for(int i = 0; i < numThreads; i++){
-        int err = pthread_create(&threadInfo[i].threadID, nullptr, threadFunc, threadInfo + i);
-        if (err != 0)
-        {
-            cout << "Could not create Thread " << i << ". [" << err << "]: " <<
-                 strerror(err) << endl << flush;
-            exit(1);
-        }
-    }
-
-    // wait for threads to finish
-    for(int i = 0; i < numThreads; i++){
-        pthread_join(threadInfo[i].threadID, nullptr);
-    }
-
-    // destroy lock
-    pthread_mutex_destroy(&myWriteLock);
-
-    // write output image
-    writeTGA(output_image.c_str(), imageOut);
 
 	launchTime = time(NULL);
 }
@@ -353,6 +345,8 @@ void* threadFunc(void* argument){
 
     int** rasterOut = (int**)(info->imageOut->raster2D);
 
+    //create vector for each pixel
+
     int count = 0;
 
     do {
@@ -361,9 +355,7 @@ void* threadFunc(void* argument){
         unsigned int i = info->rowDist(myEngine);
         unsigned int j = info->colDist(myEngine);
 
-        //cout << "Thread " << info->threadID << " is focusing on pixel (" << i << ", " << j << ")" << endl;
 
-        // loop through images
         unsigned char contrast_score = 0;
         unsigned char image_index = 0;
 
@@ -381,12 +373,20 @@ void* threadFunc(void* argument){
         }
 
         // get the raster of the image with the highest contrast score
-
         combine_images(rasterOut, info->images[image_index], i, j);
+
+        // check to see if the user pressed the escape key
+        if (shouldTerminate) {
+            break;
+        }
+
         count++;
 
+        //check to see if escape key was pressed
     }
-    while(count < 10000);
+    while(true);
+
+    liveFocusingThreads--;
 
     return nullptr;
 }

@@ -9,6 +9,7 @@
 #include <vector>
 #include <algorithm>
 #include <random>
+#include <unistd.h>
 //
 #include <cstdio>
 #include <cstdlib>
@@ -83,6 +84,11 @@ uniform_int_distribution<unsigned int> colDist;
 
 const string hardCodedOutPath = "./outputImage.tga";
 
+unsigned int numThreads;
+std::string output_image;
+std::vector<RasterImage*> images;
+
+
 //jyh
 //	Let's do it C++ style
 //typedef struct
@@ -101,6 +107,9 @@ struct ThreadInfo
     vector<RasterImage*> images;
     RasterImage* imageOut;
 };
+
+std::vector<ThreadInfo> threadInfo;
+unsigned int k = 0;
 
 //==================================================================================
 //	These are the functions that tie the computation with the rendering.
@@ -125,20 +134,14 @@ void displayImage(GLfloat scaleX, GLfloat scaleY)
 //	//	Here, each time we render the image I assign a random
 //	//	color to a few random pixels
 //	//--------------------------------------------------------
-//	unsigned char** imgRaster2D = (unsigned char**)(imageOut->raster2D);
-//
-//	for (int k=0; k<100; k++) {
-//		unsigned int i = rowDist(myEngine);
-//		unsigned int j = colDist(myEngine);
-//
-//		//	get pointer to the pixel at row i, column j
-//		unsigned char* rgba = imgRaster2D[i] + 4*j;
-//		// random r, g, b
-//		rgba[0] = colorChannelDist(myEngine);
-//		rgba[1] = colorChannelDist(myEngine);
-//		rgba[2] = colorChannelDist(myEngine);
-//		//	keep alpha unchanged at 255
-//	}
+
+    // each time the image is rendered, create a new thread until the max number of threads is reached
+    if (k < numThreads){
+                pthread_create(&threadInfo[k].threadID, NULL, threadFunc, &threadInfo[k]);
+                k++;
+    }
+    // delay the next thread creation
+    usleep(200000);
 
     //==============================================
     //	This is OpenGL/glut magic.  Don't touch
@@ -147,6 +150,8 @@ void displayImage(GLfloat scaleX, GLfloat scaleY)
                  GL_RGBA,
                  GL_UNSIGNED_BYTE,
                  imageOut->raster);
+
+
 
 }
 
@@ -173,6 +178,7 @@ void displayState(void)
     sprintf(message[2], "I like cheese");
 
 
+
     //---------------------------------------------------------
     //	This is the call that makes OpenGL render information
     //	about the state of the simulation.
@@ -185,7 +191,7 @@ void displayState(void)
 
 void cleanupAndQuit(void)
 {
-    writeTGA(hardCodedOutPath.c_str(), imageOut);
+    //writeTGA(hardCodedOutPath.c_str(), imageOut);
 
     //	Free allocated resource before leaving (not absolutely needed, but
     //	just nicer.  Also, if you crash there, you know something is wrong
@@ -195,6 +201,16 @@ void cleanupAndQuit(void)
     free(message);
 
     // delete images [optional]
+    images.clear();
+
+    // join threads
+    for (unsigned int k = 0; k < numThreads; k++) {
+        void* useless;
+        pthread_join(threadInfo[k].threadID, &useless);
+    }
+
+    // write output image
+    writeTGA(output_image.c_str(), imageOut);
 
     exit(0);
 }
@@ -288,19 +304,20 @@ void initializeApplication(int argc, char** argv)
     //	simulation), only some color, in meant-to-be-thrown-away code
 
     // Read the command line arguments
-    unsigned int numThreads = stoi(argv[1]);
-    std::string output_image = argv[2];
+    numThreads = stoi(argv[1]);
+    output_image = argv[2];
+    numLiveFocusingThreads = numThreads;
 
     // create a vector of raster images
-    vector<RasterImage*> images;
     for(int i = 3; i < argc; i++){
         images.push_back(readTGA(argv[i]));
     }
 
     // initialize output image
     imageOut = new RasterImage(images[0]->width, images[0]->height, RGBA32_RASTER);
-    // create array of ThreadInfo structs
-    ThreadInfo* threadInfo = (ThreadInfo*) calloc(numThreads, sizeof(ThreadInfo));
+
+    threadInfo.resize(numThreads);
+
 
     // create start and end index for threads
     unsigned int m = images[0]->height / numThreads;
@@ -320,23 +337,6 @@ void initializeApplication(int argc, char** argv)
         start = end + 1;
         end = start + m - 1;
     }
-
-    // create threads
-    for (unsigned int k = 0; k < numThreads; k++) {
-        pthread_create(&threadInfo[k].threadID, NULL, threadFunc, threadInfo+k);
-    }
-
-    // wait for threads to finish
-    for (unsigned int k = 0; k < numThreads; k++) {
-        void* useless;
-        pthread_join(threadInfo[k].threadID, &useless);
-    }
-
-    // free memory
-    free(threadInfo);
-
-    // write output image
-    writeTGA(output_image.c_str(), imageOut);
 
     launchTime = time(NULL);
 }
@@ -386,6 +386,8 @@ void* threadFunc(void* argument){
         }
 
     }
+
+    numLiveFocusingThreads--;
 
     return NULL;
 
